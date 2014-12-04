@@ -1,0 +1,195 @@
+package com.guide.meditation;
+
+import android.app.ActionBar;
+import android.app.FragmentTransaction;
+import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.os.Bundle;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.view.ViewPager;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.RelativeLayout;
+import android.widget.RelativeLayout.LayoutParams;
+import android.widget.TextView;
+
+import com.sample.FragChantingSongs.OnChantingSongSelectedBtClicks;
+import com.sample.FragGuidedSongs.OnSongSelectedBtClicks;
+import com.sample.utils.NativeUtils;
+import com.sample.android.R;
+
+public class FragActivitySongSelection extends FragmentActivity implements OnSongSelectedBtClicks,OnChantingSongSelectedBtClicks {
+	ViewPager Tab;
+    SongTabPagerAdapter TabAdapter;
+	ActionBar actionBar;
+	
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.song_selection_frag_activity);
+        
+        TabAdapter = new SongTabPagerAdapter(getSupportFragmentManager());
+        
+        Tab = (ViewPager)findViewById(R.id.pager);
+        
+       
+        
+        Tab.setOffscreenPageLimit(4);
+        Tab.setOnPageChangeListener(
+                new ViewPager.SimpleOnPageChangeListener() {
+                    @Override
+                    public void onPageSelected(int position) {
+                       
+                    	actionBar = getActionBar();
+                    	
+                    	actionBar.setSelectedNavigationItem(position);     
+                    	
+                    	if (position == 0) {
+                    		Log.e("fb","onPage -    Guided"   );
+                    		
+                    	}else if (position ==1){
+                    		Log.e("fb","onPage -  chanting"  );
+                    	}
+                    	
+                    	
+                    	
+                    
+                    }
+                    
+                    
+                    @Override
+                    public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels)
+                    {
+                    	// TODO Auto-generated method stub
+                    	super.onPageScrolled(position, positionOffset, positionOffsetPixels);
+                    	
+                    	
+                    	
+                    	
+                    }
+                    
+                    
+                    @Override
+                    public void onPageScrollStateChanged(int state)
+                    {
+                    	// TODO Auto-generated method stub
+                    	super.onPageScrollStateChanged(state);
+                    	Log.e("fb","onPageScrollStateChanged - state " + state );
+                    }
+                    
+                    
+                    
+                });
+        Tab.setAdapter(TabAdapter);
+        
+        actionBar = getActionBar();
+        //actionBar.setDisplayShowTitleEnabled(false);
+       // actionBar.setDisplayShowCustomEnabled(true);
+        
+        
+        SpannableString s = new SpannableString("Choose");
+        s.setSpan(NativeUtils.getMediumFontType(getApplicationContext()), 0, s.length(),
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        
+        
+        
+//        TextView txtTab3 = new TextView(this);
+//		txtTab3.setText("Choose");
+//		txtTab3.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+//		txtTab3.setTextColor(Color.WHITE);
+//		txtTab3.setTextSize(17);
+		
+		
+		//txtTab3.setTypeface(NativeUtils.getMediumFontType(getApplicationContext()),Typeface.BOLD);
+//		LayoutInflater inflator = LayoutInflater.from(this);
+//		View v = inflator.inflate(R.layout.actionbar_title, null);
+        
+      //  actionBar.setCustomView(v);
+		// actionBar.setTitle("Choose");
+        actionBar.setTitle(s);
+        //actionBar.setIcon(null);
+        //Enable Tabs on Action Bar
+        actionBar.setNavigationMode(ActionBar.NAVIGATION_MODE_TABS);
+        ActionBar.TabListener tabListener = new ActionBar.TabListener(){
+
+			@Override
+			public void onTabReselected(android.app.ActionBar.Tab tab,
+					FragmentTransaction ft) {
+				// TODO Auto-generated method stub
+				
+			}
+
+			@Override
+			 public void onTabSelected(ActionBar.Tab tab, FragmentTransaction ft) {
+	          
+	            Tab.setCurrentItem(tab.getPosition());
+	        }
+
+			@Override
+			public void onTabUnselected(android.app.ActionBar.Tab tab,
+					FragmentTransaction ft) {
+				// TODO Auto-generated method stub
+				
+			}};
+			
+			RelativeLayout.LayoutParams rp = new RelativeLayout.LayoutParams(LayoutParams.WRAP_CONTENT,LayoutParams.WRAP_CONTENT);
+			rp.setMargins(0, 10, 0, 0);
+			
+			TextView txtTab = new TextView(this);
+			txtTab.setText("Guided Mediataion");
+			txtTab.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+			txtTab.setTextColor(Color.WHITE);
+			
+			txtTab.setTextSize(17);
+			txtTab.setTypeface(NativeUtils.getMediumFontType(getApplicationContext()));
+			
+			
+			TextView txtTab2 = new TextView(this);
+			txtTab2.setText("Chanting");
+			txtTab2.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
+			txtTab2.setTextColor(Color.WHITE);
+			txtTab2.setTextSize(17);
+			txtTab2.setLayoutParams(rp);
+			txtTab2.setTypeface(NativeUtils.getMediumFontType(getApplicationContext()));
+			
+			
+			//Add New Tab
+			actionBar.addTab(actionBar.newTab().setCustomView(txtTab).setTabListener(tabListener));
+			//actionBar.addTab(actionBar.newTab().setText("Guided Mediataion").setTabListener(tabListener));
+			//actionBar.addTab(actionBar.newTab().setText("Music").setTabListener(tabListener));
+			//actionBar.addTab(actionBar.newTab().setText("Mantra").setTabListener(tabListener));
+			actionBar.addTab(actionBar.newTab().setCustomView(txtTab2).setTabListener(tabListener));
+		
+
+    }
+
+    
+    /*
+     * 
+     *  callback to get back from frag to activity
+     *  when song selected get back to submit session
+     */
+    
+	@Override
+	public void songSelectedInFrag(String songName, String songId, String songDuration)
+	{
+	//go to the song page that requested it 
+		Intent i = getIntent();
+		i.putExtra("songId", songId);
+		i.putExtra("songDuration", songDuration);
+		i.putExtra("songName", songName);
+		setResult(RESULT_OK, i);
+		finish();
+		
+	}
+
+
+
+    
+}
