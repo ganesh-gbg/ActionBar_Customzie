@@ -1,0 +1,890 @@
+package com.guide.meditation;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.app.DownloadManager;
+import android.app.ProgressDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.database.Cursor;
+import android.graphics.Typeface;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.MediaPlayer.OnCompletionListener;
+import android.media.MediaPlayer.OnPreparedListener;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.support.v4.app.Fragment;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.ViewGroup;
+import android.widget.BaseAdapter;
+import android.widget.ImageView;
+import android.widget.ListView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.google.android.gms.analytics.GoogleAnalytics;
+import com.google.android.gms.analytics.HitBuilders;
+import com.google.android.gms.analytics.Tracker;
+import com.guide.meditation.FragGuidedSongs.GetMusicList;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter;
+import com.guide.meditation.FragGuidedSongs.OnSongSelectedBtClicks;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.CancelDownLoadingTheSong;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.DownLoadTheSong;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.PlayTheSong;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.SongSelected;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.StopTheSong;
+import com.guide.meditation.FragGuidedSongs.GuideMeditationAdapter.ViewHolder;
+import com.meditation.timer.utils.GoogleApplication;
+import com.meditation.timer.utils.GoogleApplication.TrackerName;
+import com.meditation.timer.utils.NativeUtils;
+import com.meditation.timer.utils.PostDataHelper;
+import com.meditation.tracker.android.R;
+import com.nostra13.universalimageloader.core.DisplayImageOptions;
+import com.nostra13.universalimageloader.core.ImageLoader;
+import com.nostra13.universalimageloader.core.ImageLoaderConfiguration;
+import com.nostra13.universalimageloader.core.assist.ImageLoadingListener;
+import com.nostra13.universalimageloader.core.display.RoundedBitmapDisplayer;
+
+public class FragChantingSongs extends Fragment
+{
+	ListView							guide_meditation_list;
+	DownloadManager						downloadManager;
+	MediaPlayer							mediaPlayer;
+	HashSet<String>						downloadedSongsNames	= new HashSet<String>();
+	List<GuideMeditationClass>			mListData;
+	AsyncTask<String, Void, Boolean>	getMusicList;
+	GuideMeditationAdapter				mGuideAdapter;
+	HashMap<Long, String>				downloadCompleted		= new HashMap<Long, String>();
+	String								currentlyPlayingSong, currentlyPlayingSongUrl;
+	DisplayImageOptions					options;
+	protected ImageLoader				imageLoader				= ImageLoader.getInstance();
+	private ImageLoadingListener		animateFirstListener	= new ImageUtils.AnimateFirstDisplayListener();
+	Typeface							regular;
+	ProgressDialog						mDialog;
+	AsyncTask<String, Integer, Boolean>	downloadSongTask;
+	OnChantingSongSelectedBtClicks				btclick; 
+	
+
+	public interface OnChantingSongSelectedBtClicks
+	{
+		public void songSelectedInFrag(String songName, String songId, String songDuration);
+
+	}
+
+	@Override
+	public void onAttach(Activity activity)
+	{
+		super.onAttach(activity);
+
+		try
+		{
+			btclick = (OnChantingSongSelectedBtClicks) activity;
+		}
+		catch (ClassCastException e)
+		{
+			throw new ClassCastException(activity.toString() + " must implement OnChantingSongSelectedBtClicks");
+		}
+
+	}
+	
+	@Override
+	public void setMenuVisibility(boolean menuVisible)
+	{	super.setMenuVisibility(menuVisible);
+	if (getMusicList != null && getMusicList.getStatus() == AsyncTask.Status.RUNNING) {
+		getMusicList.cancel(true);
+	}
+	
+	if (mDialog != null){
+		if (mDialog.isShowing())
+			mDialog.dismiss();
+	}
+	mDialog = null;
+	    if(!menuVisible){
+	    	if (mediaPlayer != null) {
+				mediaPlayer.release();
+				mediaPlayer = null;
+				currentlyPlayingSong=null;
+				
+				if(mGuideAdapter!=null)
+					mGuideAdapter.notifyDataSetChanged();
+			}
+	    }
+	    
+	    
+	
+	}
+	
+	
+
+	@Override
+	public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
+	{
+
+		View fragView = inflater.inflate(R.layout.fragsongs, container, false);
+		guide_meditation_list = (ListView) fragView.findViewById(R.id.guide_meditation_list);
+
+		regular = NativeUtils.getRegularFontType(getActivity());
+
+		// get download service and enqueue file
+		downloadManager = (DownloadManager) getActivity().getSystemService(Context.DOWNLOAD_SERVICE);
+		// initilaze lazy loading
+		imageLoader.init(ImageLoaderConfiguration.createDefault(getActivity()));
+		options = new DisplayImageOptions.Builder().cacheInMemory(true).cacheOnDisc(true).displayer(new RoundedBitmapDisplayer(0)).build();
+
+		mListData = new ArrayList<GuideMeditationClass>();
+		getMusicList = new GetMusicList().execute("");
+
+		// set filter to only when download is complete and register broadcast
+		// receiver
+		IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+		getActivity().registerReceiver(onComplete, filter);
+		// Download manager has completed its job and notified - when user
+		// clicks the notification ,below could recive
+		IntentFilter notifilter = new IntentFilter(DownloadManager.ACTION_NOTIFICATION_CLICKED);
+		getActivity().registerReceiver(notificationClick, notifilter);
+
+		return fragView;
+	}
+
+	@Override
+	public void onResume()
+	{
+		super.onResume();
+		currentlyPlayingSong = null;
+
+		// get all previously downloaded songs Id in the arraylist
+		File directory = Environment.getExternalStorageDirectory();
+
+		File file = new File(directory + File.separator + Environment.DIRECTORY_DOWNLOADS + "/MeditationSongs");
+		if (!file.exists())
+		{
+			file.mkdirs();
+		}
+
+		Log.v("fb", "file" + file);
+		File list[] = file.listFiles();
+		if (list != null)
+		{
+			for (int i = 0; i < list.length; i++)
+			{
+				Log.v("fb", "list file " + list[i].getName());
+				downloadedSongsNames.add(list[i].getName());
+			}
+		}
+		Log.v("fb", "onCreate" + downloadedSongsNames.toString());
+	}
+
+	public class GetMusicList extends AsyncTask<String, Void, Boolean>
+	{
+		String						regResponse;
+
+		public static final String	TAG_RESPONSE			= "response";
+		public static final String	TAG_REMINDERS			= "Reminders";
+		public static final String	TAG_DESCRIPTION			= "Description";
+		public static final String	TAG_PRICE				= "Price";
+		public static final String	TAG_DURATION			= "Duration";
+		public static final String	TAG_ID					= "Id";
+		public static final String	TAG_URL					= "Url";
+		public static final String	TAG_NAME				= "Name";
+		public static final String	TAG_SUCCESS				= "success";
+		public static final String	TAG_IMAGEURL			= "SelectedImage";
+		public static final String	TAG_SELCETEDIMAGEURL	= "SelectedImage";
+
+		@Override
+		protected void onPreExecute()
+		{
+			mDialog = new ProgressDialog(getActivity());
+			mDialog.setMessage("Loading...!");
+			mDialog.show();
+		}
+
+		@Override
+		protected Boolean doInBackground(String... params)
+		{
+
+			if (!isCancelled())
+			{
+				try
+				{
+					ArrayList<String> keys = new ArrayList<String>();
+					ArrayList<String> values = new ArrayList<String>();
+					
+					keys.add("Type");
+					values.add("Chants");
+					
+
+					PostDataHelper pdata = new PostDataHelper(keys, values, getActivity());
+					regResponse = pdata.postData(<URL >);
+
+				}
+				catch (Exception e)
+				{
+					e.printStackTrace();
+					return false;
+				}
+
+				return true;
+			}
+			else
+			{
+
+				return false;
+			}
+
+		}
+
+		@Override
+		protected void onPostExecute(Boolean res)
+		{
+
+			if (mDialog.isShowing())
+			{
+				mDialog.dismiss();
+			}
+
+			if (res)
+			{
+				if (regResponse == null)
+				{
+				}
+				else
+				{
+					try
+					{
+						JSONObject resObj = new JSONObject(regResponse);
+
+						JSONObject response_obj = resObj.getJSONObject(TAG_RESPONSE);
+
+						JSONArray Reminders = response_obj.getJSONArray(TAG_REMINDERS);
+						for (int Reminders_i = 0; Reminders_i < Reminders.length(); Reminders_i++)
+						{
+							JSONObject Reminders_obj = Reminders.getJSONObject(Reminders_i);
+							String str_Description = Reminders_obj.getString(TAG_DESCRIPTION);
+							String str_Price = Reminders_obj.getString(TAG_PRICE);
+							String str_Duration = Reminders_obj.getString(TAG_DURATION);
+							String str_Id = Reminders_obj.getString(TAG_ID);
+							String str_Url = Reminders_obj.getString(TAG_URL);
+							String str_Name = Reminders_obj.getString(TAG_NAME);
+							Log.e("Name", str_Name);
+							mListData.add(new GuideMeditationClass(str_Id, str_Url, str_Name, str_Duration, str_Description, str_Price, false, false, Reminders_obj.getString(TAG_IMAGEURL),
+									Reminders_obj.getString(TAG_SELCETEDIMAGEURL), "N"));
+						}
+						// String str_success =
+						// response_obj.getString(TAG_SUCCESS);
+
+					}
+					catch (JSONException e)
+					{
+						e.printStackTrace();
+					}
+					mGuideAdapter = new GuideMeditationAdapter(getActivity());
+					Log.v("fb", "adapter" + mGuideAdapter + " list  " + guide_meditation_list);
+					guide_meditation_list.setAdapter(mGuideAdapter);
+				}
+
+			}
+		}
+	}
+
+	class GuideMeditationAdapter extends BaseAdapter
+	{
+		Context			mAppContext;
+
+		LayoutInflater	inflater;
+
+		/**
+		 * @param guidedMedicationActivity
+		 * @param mListData
+		 */
+		public GuideMeditationAdapter(Context guidedMedicationActivity)
+		{
+			this.mAppContext = guidedMedicationActivity;
+
+			inflater = (LayoutInflater) mAppContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+			Log.e("Content Value", mListData + "");
+
+		}
+
+		@Override
+		public int getCount()
+		{
+			return mListData.size();
+		}
+
+		@Override
+		public GuideMeditationClass getItem(int position)
+		{
+			return mListData.get(position);
+		}
+
+		@Override
+		public long getItemId(int position)
+		{
+			return position;
+		}
+
+		/********* Create a holder Class to contain inflated xml file elements *********/
+		public class ViewHolder
+		{
+			ImageView			songimage, song_pausebt, song_playbt, already_downloaded, notdownload;
+			ImageView	downloadstop;
+			TextView			meditation_music_name;
+			TextView			duration_value;
+
+		}
+
+		public View getView(final int position, View convertView, ViewGroup parent)
+		{
+			// adapPos = position;
+			View vi = convertView;
+			final ViewHolder holder;
+			if (convertView == null)
+			{
+				vi = inflater.inflate(R.layout.fragsong_row, null);
+				holder = new ViewHolder();
+				holder.songimage = (ImageView) vi.findViewById(R.id.songimage);
+				holder.meditation_music_name = (TextView) vi.findViewById(R.id.meditation_music_name);
+				holder.duration_value = (TextView) vi.findViewById(R.id.duration_value);
+				holder.song_playbt = (ImageView) vi.findViewById(R.id.songplay);
+				holder.already_downloaded = (ImageView) vi.findViewById(R.id.downloded);
+				holder.downloadstop = (ImageView) vi.findViewById(R.id.downloadstop);
+				holder.notdownload = (ImageView) vi.findViewById(R.id.notdownload);
+				holder.song_pausebt = (ImageView) vi.findViewById(R.id.songpause);
+
+				
+				holder.meditation_music_name.setTypeface(NativeUtils.getRegularFontType(getActivity()));
+				holder.meditation_music_name.setTextSize(14);
+				
+				holder.duration_value.setTypeface(NativeUtils.getRegularFontType(getActivity()));
+				holder.duration_value.setTextSize(11);
+				
+				
+				/************ Set holder with LayoutInflater ************/
+				vi.setTag(holder);
+			}
+			else
+			{
+				holder = (ViewHolder) vi.getTag();
+			}
+
+			GuideMeditationClass itemVale = getItem(position);
+
+			holder.meditation_music_name.setText(itemVale.songName);
+			holder.duration_value.setText(itemVale.songDuration + " Min");
+			holder.already_downloaded.setVisibility(View.GONE);
+			holder.song_playbt.setVisibility(View.VISIBLE);
+			holder.notdownload.setVisibility(View.GONE);
+			holder.song_pausebt.setVisibility(View.GONE);
+			holder.downloadstop.setVisibility(View.GONE);
+
+			if (downloadedSongsNames.isEmpty())
+			{
+				holder.notdownload.setVisibility(View.VISIBLE);
+			}
+			else
+			{
+
+				Log.v("fb", "do" + downloadedSongsNames + " " + itemVale.songName);
+
+				if (downloadedSongsNames.contains(itemVale.songName + ".mp3"))
+				{
+					Log.v("fb", "do is gone");
+					holder.notdownload.setVisibility(View.GONE);
+					holder.downloadstop.setVisibility(View.GONE);
+					holder.already_downloaded.setVisibility(View.VISIBLE);
+				}
+				else
+				{
+					holder.notdownload.setVisibility(View.VISIBLE);
+					holder.downloadstop.setVisibility(View.GONE);
+					holder.already_downloaded.setVisibility(View.GONE);
+
+				}
+			}
+
+			
+			
+			if (currentlyPlayingSong != null && currentlyPlayingSong.equals(itemVale.songName))
+			{
+				holder.song_playbt.setVisibility(View.GONE);
+				holder.song_pausebt.setVisibility(View.VISIBLE);
+			}
+			else
+			{
+				holder.song_playbt.setVisibility(View.VISIBLE);
+				holder.song_pausebt.setVisibility(View.GONE);
+			}
+
+			imageLoader.displayImage(itemVale.imageUrl, holder.songimage, options);
+
+			holder.notdownload.setOnClickListener(new DownLoadTheSong(itemVale, holder.downloadstop));
+
+			holder.already_downloaded.setOnClickListener(new SongSelected(itemVale));
+			
+			holder.downloadstop.setOnClickListener(new CancelDownLoadingTheSong(holder.notdownload,itemVale));
+
+			holder.song_playbt.setOnClickListener(new PlayTheSong(itemVale, holder.song_pausebt));
+			holder.song_pausebt.setOnClickListener(new StopTheSong(holder.song_playbt));
+
+			return vi;
+		}
+
+		/************ Song Selected ************/
+		class SongSelected implements OnClickListener
+		{
+			GuideMeditationClass	listPositionValue;
+
+			SongSelected(GuideMeditationClass value)
+			{
+				listPositionValue = value;
+			}
+
+			@Override
+			public void onClick(View v)
+			{
+				if (mediaPlayer != null)
+				{
+					mediaPlayer.release();
+					mediaPlayer = null;
+				}
+				currentlyPlayingSong = null;
+				// all preview bts status is play and playing song status is
+				// stop bt
+				mGuideAdapter.notifyDataSetChanged();
+				if (downloadedSongsNames.contains((listPositionValue.songName + ".mp3")))
+				{
+
+					btclick.songSelectedInFrag(listPositionValue.songName, listPositionValue.songID, listPositionValue.songDuration);
+
+					// Intent i = getIntent();
+					// i.putExtra("songId", listPositionValue.songID);
+					// i.putExtra("songDuration",
+					// listPositionValue.songDuration);
+					// i.putExtra("songName", listPositionValue.songName);
+					// setResult(RESULT_OK, i);
+					// finish();
+				}
+				else
+				{
+					Toast.makeText(getActivity().getApplicationContext(), "You need to download the song to select", Toast.LENGTH_SHORT).show();
+				}
+
+			}
+		}
+
+		/************ Stop Song ************/
+		class StopTheSong implements OnClickListener
+		{
+			ImageView	playButton;
+
+			StopTheSong(ImageView play)
+			{
+				playButton = play;
+			}
+
+			@Override
+			public void onClick(View v)
+			{
+				playButton.setVisibility(View.VISIBLE);
+				v.setVisibility(View.GONE);
+				if (mediaPlayer != null)
+				{
+					mediaPlayer.release();
+					mediaPlayer = null;
+					currentlyPlayingSong=null;
+				}
+			}
+		}
+
+		/************ Play Song ************/
+		class PlayTheSong implements OnClickListener
+		{
+			GuideMeditationClass	listPositionValue;
+			ImageView				pauseButton;
+
+			PlayTheSong(GuideMeditationClass pos, ImageView stop)
+			{
+				listPositionValue = pos;
+				pauseButton = stop;
+			}
+
+			@Override
+			public void onClick(View v)
+			{
+				currentlyPlayingSong = listPositionValue.songName;
+				// all preview bts status is play and playing song status is
+				// stop bt
+				mGuideAdapter.notifyDataSetChanged();
+				if (mediaPlayer != null && mediaPlayer.isPlaying())
+				{
+					mediaPlayer.stop();
+					mediaPlayer.reset();
+				}
+
+				try
+				{
+					if (downloadedSongsNames.contains((listPositionValue.songName + ".mp3")))
+					{
+						String path = "file://" + Environment.getExternalStorageDirectory() + File.separator + Environment.DIRECTORY_DOWNLOADS + "/MeditationSongs/" + listPositionValue.songName
+								+ ".mp3";
+						Log.v("fb", "play song  " + path);
+						Uri mp3 = Uri.parse(path);
+						mediaPlayer = new MediaPlayer();
+						mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+						mediaPlayer.setDataSource(getActivity().getApplicationContext(), mp3);
+						mediaPlayer.prepare();
+						mediaPlayer.start();
+						Log.v("fb", "play song mediaPlayer " + mediaPlayer);
+						mediaPlayer.setOnCompletionListener(onCompletionListener);
+
+					}
+					else
+					{
+						mDialog = new ProgressDialog(getActivity());
+						mDialog.setMessage("Buffering...!");
+						mDialog.show();
+
+						mediaPlayer = new MediaPlayer();
+						mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+						mediaPlayer.setDataSource(listPositionValue.songURL);
+						// For streams, you should call prepareAsync() to avoid
+						// blocking UI
+						mediaPlayer.prepareAsync();
+						mediaPlayer.setOnCompletionListener(onCompletionListener);
+						mediaPlayer.setOnPreparedListener(onPlayerReadyToStartListener);
+
+					}
+
+				}
+				catch (IllegalArgumentException e)
+				{
+					e.printStackTrace();
+				}
+				catch (SecurityException e)
+				{
+					e.printStackTrace();
+				}
+				catch (IllegalStateException e)
+				{
+					e.printStackTrace();
+				}
+				catch (Exception e)
+				{
+					e.printStackTrace();
+				}
+			}
+		}
+
+		private OnCompletionListener	onCompletionListener			= new OnCompletionListener()
+																		{
+																			@Override
+																			public void onCompletion(MediaPlayer mp)
+																			{
+																				mediaPlayer.release();
+																				mediaPlayer = null;
+																				currentlyPlayingSong=null;
+																				
+																				mGuideAdapter.notifyDataSetChanged();
+																			}
+																		};
+
+		private OnPreparedListener		onPlayerReadyToStartListener	= new OnPreparedListener()
+																		{
+																			@Override
+																			public void onPrepared(MediaPlayer mp)
+																			{
+																				Log.v("fb", "onPrepared");
+																				if (mDialog.isShowing())
+																					mDialog.dismiss();
+																				mp.start();
+																			}
+																		};
+
+		/************ Download Song ************/
+		class DownLoadTheSong implements OnClickListener
+		{
+			GuideMeditationClass	listPositionValue;
+			ImageView		downloadstop;
+
+			DownLoadTheSong(GuideMeditationClass pos, ImageView mBar)
+			{
+				listPositionValue = pos;
+				downloadstop = mBar;
+
+			}
+
+			@Override
+			public void onClick(View v)
+			{
+				v.setVisibility(View.GONE);
+				downloadstop.setVisibility(View.VISIBLE);
+
+				
+				
+				
+
+				Boolean result = isDownloadManagerAvailable(getActivity().getApplicationContext());
+				if (result)
+					downloadFile(listPositionValue.songURL, listPositionValue.songName, listPositionValue.songID, listPositionValue);
+
+			}
+		}
+
+		/************ cancel downloading Song ************/
+		class CancelDownLoadingTheSong implements OnClickListener
+		{
+			GuideMeditationClass	listPositionValue;
+			ImageView				startdownLoad;
+
+			CancelDownLoadingTheSong(ImageView start, GuideMeditationClass pos)
+			{
+				startdownLoad = start;
+				listPositionValue = pos;
+			}
+
+			@Override
+			public void onClick(View v)
+			{
+				startdownLoad.setVisibility(View.VISIBLE);
+				v.setVisibility(View.GONE);
+				if (downloadManager != null && listPositionValue.getDownLoadId() != 0)
+					downloadManager.remove(listPositionValue.getDownLoadId());
+			}
+		}
+
+	}
+
+	
+	/************ Song Downloding completed ************/
+	BroadcastReceiver	onComplete			= new BroadcastReceiver()
+											{
+												public void onReceive(Context ctxt, Intent intent)
+												{
+													String action = intent.getAction();
+													// broadcast shal fire for
+													// cancel also so better
+													// check for
+													// successful download
+													if (DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(action))
+													{
+														long referenceId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+
+														Cursor c = downloadManager.query(new DownloadManager.Query().setFilterById(referenceId));
+														Log.v("fb", "cursor count" + c.getCount());
+
+														if (c != null && c.getCount() != 0)
+														{
+															c.moveToFirst();
+															int status = c.getInt(c.getColumnIndex(DownloadManager.COLUMN_STATUS));
+
+															if (status == DownloadManager.STATUS_SUCCESSFUL)
+															{
+																Log.v("fb", "load ref on complet" + referenceId);
+																String name = downloadCompleted.get(Long.valueOf(referenceId));
+																Log.v("fb", "completed song name " + name);
+																downloadedSongsNames.add(name);
+																//currentlyDownloadingRefId =0;
+																mGuideAdapter.notifyDataSetChanged();
+																Log.v("fb", "onCompleted" + downloadedSongsNames.toString());
+															}
+
+														}
+													}
+
+												}
+
+											};	// oncomplete
+
+	/************ Notification clicked ************/
+	BroadcastReceiver	notificationClick	= new BroadcastReceiver()
+											{
+												@Override
+												public void onReceive(Context context, Intent intent)
+												{
+													Log.e("fb","notificationClick in Frag");
+												}
+
+											};
+
+	// ///////////////////////////////////
+	// ////////////Helper methods////////
+	// //////////////////////////////////
+
+	@SuppressLint("NewApi")
+	public void downloadFile(String songUrl, String songName, String songId, GuideMeditationClass listPositionValue)
+	{
+		DownloadManager.Request request = new DownloadManager.Request(Uri.parse(songUrl));
+		// appears the same in
+		// Notification bar while downloading
+		request.setDescription("Meditation App");
+		request.setTitle(songName);
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB)
+		{
+			request.allowScanningByMediaScanner();
+			request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+		}
+
+		// the downloaded file to go to the default "Downloads/MeditationSongs"
+		// directory of SD card
+		request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS + "/MeditationSongs/", songName + ".mp3");
+
+		final long downloadReference = downloadManager.enqueue(request);
+		Log.e("fb", "load ref" + downloadReference);
+		downloadCompleted.put(Long.valueOf(downloadReference), songName + ".mp3");
+		listPositionValue.setDownLoadId(downloadReference);
+		
+
+//		currentlyDownloadingRefId =downloadReference;
+//		new Thread(new Runnable()
+//		{
+//
+//			@Override
+//			public void run()
+//			{
+//
+//				boolean downloading = true;
+//
+//				while (downloading)
+//				{
+//
+//					DownloadManager.Query q = new DownloadManager.Query();
+//					q.setFilterById(downloadReference);
+//
+//					Cursor cursor = downloadManager.query(q);
+//					cursor.moveToFirst();
+//					int bytes_downloaded = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+//					int bytes_total = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+//
+//					if (cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL)
+//					{
+//						downloading = false;
+//					}
+//
+//					// final double dl_progress = (bytes_downloaded /
+//					// bytes_total) * 100;
+//					final int dl_progress = (int) ((bytes_downloaded * 100l) / bytes_total);
+//					getActivity().runOnUiThread(new Runnable()
+//					{
+//
+//						@Override
+//						public void run()
+//						{
+//
+//							pBar.setProgress((int) dl_progress);
+//
+//						}
+//					});
+//
+//					// Log.d(Constants.MAIN_VIEW_ACTIVITY,
+//					// statusMessage(cursor));
+//					cursor.close();
+//				}
+//
+//			}
+//		}).start();
+
+	}
+
+	public static boolean isDownloadManagerAvailable(Context context)
+	{
+		try
+		{
+			if (Build.VERSION.SDK_INT < Build.VERSION_CODES.GINGERBREAD)
+			{
+				return false;
+			}
+			Intent intent = new Intent(Intent.ACTION_MAIN);
+			intent.addCategory(Intent.CATEGORY_LAUNCHER);
+			intent.setClassName("com.android.providers.downloads.ui", "com.android.providers.downloads.ui.DownloadList");
+			List<ResolveInfo> list = context.getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+			return list.size() > 0;
+		}
+		catch (Exception e)
+		{
+			return false;
+		}
+	}
+
+	
+	
+	
+	
+	// ////////////////////////////////
+	// //////Track////////////////////
+
+	
+	@Override
+	public void onPause() {
+		super.onPause();
+		Log.e("fb","onPause ---------mediaPlayer " + mediaPlayer);
+		if (mediaPlayer != null) {
+			mediaPlayer.release();
+			mediaPlayer = null;
+		}
+	}
+	
+	
+	
+	@Override
+	public void onDetach()
+	{
+		// TODO Auto-generated method stub
+		super.onDetach();
+		Log.e("fb","onDetach ---------");
+		getActivity().unregisterReceiver(onComplete);
+		getActivity().unregisterReceiver(notificationClick);
+		
+	}
+	
+	
+	@Override
+	public void onStart()
+	{
+		// TODO Auto-generated method stub
+		super.onStart();
+
+		GoogleAnalytics.getInstance(getActivity()).reportActivityStart(getActivity());
+
+	}
+
+	@Override
+	public void onStop()
+	{
+		// TODO Auto-generated method stub
+		super.onStop();
+
+		GoogleAnalytics.getInstance(getActivity()).reportActivityStop(getActivity());
+	}
+
+	public void trackerMethod(String class_name, String clikEvent)
+	{
+		// Get tracker.
+		Tracker t = GoogleApplication.getTracker(TrackerName.APP_TRACKER);
+
+		// Build and send an Event.
+		t.send(new HitBuilders.EventBuilder().setCategory(class_name).setAction(clikEvent).setLabel(class_name).build());
+
+	}
+
+}
