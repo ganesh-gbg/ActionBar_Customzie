@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- the theme applied to the application or activity -->
+    <style name="CustomActionBarTheme" parent="@android:style/Theme.Holo.Light.DarkActionBar">
+        <item name="android:actionBarStyle">@style/MyActionBar</item>
+     
+       
+        <item name="android:actionBarTabStyle">@style/MyActionBarTabs</item>
+    </style>
+
+    <!-- ActionBar styles -->
+    <style name="MyActionBar" parent="@android:style/Widget.Holo.ActionBar.Solid">
+        <item name="android:background">@color/voilet</item>
+        <item name="android:icon">@android:color/transparent</item> 
+        <item name="android:titleTextStyle">@style/TitleBarTextColord</item>
+        <item name="android:backgroundStacked">@color/voilet</item>
+       
+    </style>
+
+    <!-- Action bar title -->
+   <style name="TitleBarTextColord"  parent="@android:style/TextAppearance.Holo.Widget.ActionBar.Title">
+    <item name="android:textColor">@color/white</item>
+    <item name="android:textStyle">bold</item>
+     <item name="android:textSize">17sp</item>
+    </style>
+
+   
+   
+   
+    <!-- ActionBar tabs text styles -->
+     <!-- ActionBar tabs text styles -->
+    <style name="MyActionBarTabText" parent="@android:style/Widget.Holo.Light.ActionBar.TabText">
+        <item name="android:textColor">@color/white</item>
+    </style>
+   
+
+      <!-- tab indicator -->
+    <style name="MyActionBarTabs" parent="@android:style/Widget.Holo.ActionBar.TabView">
+        <item name="android:background">@drawable/tab_indicator_ab_example</item>
+         
+    </style>
+
+    <!-- tab divider -->
+    <style name="customTabBar" parent="@android:style/Widget.Holo.ActionBar.TabBar">
+        <item name="android:showDividers">middle</item>
+        <!-- give your divider here -->
+        <item name="android:divider">@color/white</item>
+        <item name="android:dividerPadding">2dp</item>
+    </style>
+
+</resources>
